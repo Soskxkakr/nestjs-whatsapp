@@ -60,5 +60,11 @@ export class Gateway implements OnModuleInit {
         msg: message,
       });
     });
+    this.client.on('error', (error) => {
+      console.log('error', error);
+      this.server.emit('onError', {
+        msg: error,
+      });
+    });
   }
 }
