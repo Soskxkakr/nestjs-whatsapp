@@ -36,7 +36,7 @@ export class MessageService {
     );
 
     if (body.attachment) {
-      this.gateway.client.sendMessage(
+      return this.gateway.client.sendMessage(
         whatsappChat.id._serialized,
         body.attachment,
         {
