@@ -5,6 +5,7 @@ import { Contact } from 'whatsapp-web.js';
 @Injectable()
 export class ContactService {
   constructor(private readonly gateway: Gateway) {}
+
   async findAll(): Promise<Contact[]> {
     return this.gateway.client.getContacts();
   }
