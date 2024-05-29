@@ -18,6 +18,7 @@ export class Gateway implements OnModuleInit {
 
   onModuleInit() {
     this.server.on('connection', async (socket) => {
+      console.log('Connecting...', socket);
       if (!!this.client) await this.client.destroy();
 
       const { sessionId } = socket.handshake.query;
@@ -33,8 +34,6 @@ export class Gateway implements OnModuleInit {
             'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2410.1.html',
         },
         puppeteer: {
-          executablePath:
-            'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
           headless: true,
           args: ['--no-sandbox'],
         },
