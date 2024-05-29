@@ -10,4 +10,11 @@ export default {
     password: process.env.DB_PASSWORD,
     dbName: process.env.DB_NAME,
   },
+  azure: {
+    container: {
+      connectionString: process.env.CONTAINER_CONNECTION_STRING,
+      url: process.env.CONTAINER_URL,
+      name: process.env.CONTAINER_NAME,
+    },
+  },
 };

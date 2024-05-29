@@ -5,6 +5,7 @@ import {
   Location,
   Message,
   MessageMedia,
+  MessageSendOptions,
   MessageTypes,
 } from 'whatsapp-web.js';
 import { MessageEntity, QuotedMessageEntity } from './message.entity';
@@ -22,30 +23,60 @@ export class MessageService {
     };
     attachment?: MessageMedia;
   }): Promise<Message> {
-    if (body.reply) {
-      const message = await this.gateway.client.getMessageById(
-        body.reply.messageId,
-      );
-      return message.reply(body.content, body.chat.id._serialized, {
-        quotedMessageId: message.id.id,
-      });
-    }
-
+    let messageMedia: MessageMedia;
+    const messageOptions: MessageSendOptions = {};
     const whatsappChat = await this.gateway.client.getChatById(
       body.chat.id._serialized,
     );
 
     if (body.attachment) {
-      return this.gateway.client.sendMessage(
-        whatsappChat.id._serialized,
-        body.attachment,
-        {
-          caption: body.content as string,
-        },
+      messageMedia = new MessageMedia(
+        body.attachment.mimetype,
+        body.attachment.data,
+        body.attachment.filename,
+        body.attachment.filesize,
+      );
+      // messageOptions['media'] = body.attachment;
+      messageOptions['caption'] = (body.content as string) || '';
+      // if (body.attachment.mimetype === 'application/pdf')
+      messageOptions['media'] = messageMedia;
+    }
+
+    if (body.reply) {
+      const message = await this.gateway.client.getMessageById(
+        body.reply.messageId,
+      );
+      messageOptions['quotedMessageId'] = message.id.id;
+      return message.reply(
+        messageMedia || body.content,
+        body.chat.id._serialized,
+        messageOptions,
       );
     }
 
-    return whatsappChat.sendMessage(body.content);
+    return whatsappChat.sendMessage(
+      messageMedia || body.content || '',
+      messageOptions,
+    );
+
+    // if (body.reply) {
+
+    //   return message.reply(body.content, body.chat.id._serialized, {
+    //     quotedMessageId: message.id.id,
+    //   });
+    // }
+
+    // if (body.attachment) {
+    //   return this.gateway.client.sendMessage(
+    //     whatsappChat.id._serialized,
+    //     body.attachment,
+    //     {
+    //       caption: body.content as string,
+    //     },
+    //   );
+    // }
+
+    // return whatsappChat.sendMessage(body.content);
   }
 
   async reactMessage(body: { messageId: string; reaction: string }) {

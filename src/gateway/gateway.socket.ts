@@ -33,6 +33,8 @@ export class Gateway implements OnModuleInit {
             'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2410.1.html',
         },
         puppeteer: {
+          executablePath:
+            'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
           headless: true,
           args: ['--no-sandbox'],
         },
@@ -80,7 +82,6 @@ export class Gateway implements OnModuleInit {
         const quotedMsg = await message.getQuotedMessage();
         if (quotedMsg.hasMedia) {
           const attachmentData = await quotedMsg.downloadMedia();
-          console.log(attachmentData);
           this.client.sendMessage(message.from, attachmentData, {
             caption: "Here's your requested media.",
           });

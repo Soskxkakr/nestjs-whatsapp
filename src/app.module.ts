@@ -8,6 +8,7 @@ import { MessageModule } from './message/message.module';
 import { DatabaseModule } from './common/database.module';
 import { ConfigModule } from '@nestjs/config';
 import config from './config';
+import { FileModule } from './file/file.module';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import config from './config';
     }),
     ChatModule,
     ContactModule,
+    FileModule,
     DatabaseModule,
     GateWayModule,
     MessageModule,
