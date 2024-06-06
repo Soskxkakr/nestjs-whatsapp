@@ -99,7 +99,7 @@ export class MessageService {
     // this.gateway.setupMessageEventListeners();
 
     // TODO: Dynamic variable change for the limit
-    const messages = await chat.fetchMessages({ limit: 10 });
+    const messages = await chat.fetchMessages({ limit: 20 });
     messageEntities = messages.map(async (message) => {
       if (
         [
@@ -111,9 +111,6 @@ export class MessageService {
           MessageTypes.DOCUMENT,
         ].includes(message.type)
       ) {
-        if (message.id.id === 'DE597DB757F53C0C8150B04542E2D43D') {
-          console.log('messagee', message);
-        }
         const contact = await message.getContact();
 
         // Fixing cache issue only for Video type of message

@@ -18,10 +18,10 @@ export class Gateway implements OnModuleInit {
 
   onModuleInit() {
     this.server.on('connection', async (socket) => {
-      console.log('Connecting...', socket);
       if (!!this.client) await this.client.destroy();
 
       const { sessionId } = socket.handshake.query;
+
       this.client = new Client({
         authStrategy: new LocalAuth({
           dataPath: `Session-${sessionId}`,
@@ -31,15 +31,16 @@ export class Gateway implements OnModuleInit {
         webVersionCache: {
           type: 'remote',
           remotePath:
-            'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2410.1.html',
+            'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2411.2.html',
         },
         puppeteer: {
           headless: true,
           args: ['--no-sandbox'],
         },
       });
-      this.setupEventListeners();
-      this.client.initialize();
+    });
+    this.server.on('disconnect', (reason) => {
+      console.log(`socket disconnected due to ${reason}`);
     });
   }
 
@@ -61,7 +62,13 @@ export class Gateway implements OnModuleInit {
         msg: message,
       });
     });
-    this.client.once('disconnected', () => {
+    this.client.on('remote_session_saved', () => {
+      this.server.emit('onRemoteSessionSaved', {
+        msg: 'Remote session saved successfully.',
+      });
+    });
+    this.client.on('disconnected', (data) => {
+      console.log('disconnected', data);
       this.server.emit('onClientDisconnected', {
         msg: 'Client has disconnected',
       });
@@ -69,11 +76,6 @@ export class Gateway implements OnModuleInit {
     this.client.on('auth_failure', (message) => {
       this.server.emit('onAuthFailure', {
         msg: message,
-      });
-    });
-    this.client.on('error', (error) => {
-      this.server.emit('onError', {
-        msg: error,
       });
     });
     this.client.on('message_create', async (message) => {
