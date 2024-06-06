@@ -38,6 +38,8 @@ export class Gateway implements OnModuleInit {
           args: ['--no-sandbox'],
         },
       });
+      this.setupEventListeners();
+      this.client.initialize();
     });
     this.server.on('disconnect', (reason) => {
       console.log(`socket disconnected due to ${reason}`);
