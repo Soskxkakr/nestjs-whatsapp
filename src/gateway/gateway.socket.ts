@@ -1,14 +1,16 @@
 import { OnModuleInit } from '@nestjs/common';
 import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
+import mongoose from 'mongoose';
 import { Server } from 'socket.io';
 import { QuotedMessageEntity } from 'src/message/message.entity';
 import {
   Client,
-  LocalAuth,
   Message,
   MessageMedia,
   MessageTypes,
+  RemoteAuth,
 } from 'whatsapp-web.js';
+import { MongoStore } from 'wwebjs-mongo';
 
 @WebSocketGateway({ cors: true })
 export class Gateway implements OnModuleInit {
@@ -22,19 +24,29 @@ export class Gateway implements OnModuleInit {
 
       const { sessionId } = socket.handshake.query;
 
-      this.client = new Client({
-        authStrategy: new LocalAuth({
-          dataPath: `Session-${sessionId}`,
-        }),
-        userAgent:
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-        puppeteer: {
-          headless: true,
-          args: ['--no-sandbox'],
-        },
-      });
-      this.setupEventListeners();
-      this.client.initialize();
+      mongoose
+        .connect('mongodb://root:root@localhost:27017')
+        .then(() => {
+          const store = new MongoStore({ mongoose: mongoose });
+          this.client = new Client({
+            authStrategy: new RemoteAuth({
+              store: store,
+              backupSyncIntervalMs: 60000,
+              dataPath: `Session-${sessionId}`,
+            }),
+            userAgent:
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+            puppeteer: {
+              headless: true,
+              args: ['--no-sandbox'],
+            },
+          });
+          this.setupEventListeners();
+          this.client.initialize();
+        })
+        .catch((err) => {
+          console.log('error', err);
+        });
     });
     this.server.on('disconnect', (reason) => {
       console.log(`socket disconnected due to ${reason}`);
@@ -60,6 +72,7 @@ export class Gateway implements OnModuleInit {
       });
     });
     this.client.on('remote_session_saved', () => {
+      console.log('remote session saved');
       this.server.emit('onRemoteSessionSaved', {
         msg: 'Remote session saved successfully.',
       });
