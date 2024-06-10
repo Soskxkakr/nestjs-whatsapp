@@ -14,20 +14,23 @@ import { MessageEntity, QuotedMessageEntity } from './message.entity';
 export class MessageService {
   constructor(private readonly gateway: Gateway) {}
 
-  async sendMessage(body: {
-    chat: Chat;
-    content: string | MessageMedia | Location;
-    reply?: {
-      messageId: string;
-      message: string;
-    };
-    attachment?: MessageMedia;
-  }): Promise<Message> {
+  async sendMessage(
+    body: {
+      chat: Chat;
+      content: string | MessageMedia | Location;
+      reply?: {
+        messageId: string;
+        message: string;
+      };
+      attachment?: MessageMedia;
+    },
+    sessionId: string,
+  ): Promise<Message> {
     let messageMedia: MessageMedia;
     const messageOptions: MessageSendOptions = {};
-    const whatsappChat = await this.gateway.client.getChatById(
-      body.chat.id._serialized,
-    );
+    const whatsappChat = await this.gateway.clients
+      .get(sessionId)
+      .getChatById(body.chat.id._serialized);
 
     if (body.attachment) {
       messageMedia = new MessageMedia(
@@ -43,9 +46,9 @@ export class MessageService {
     }
 
     if (body.reply) {
-      const message = await this.gateway.client.getMessageById(
-        body.reply.messageId,
-      );
+      const message = await this.gateway.clients
+        .get(sessionId)
+        .getMessageById(body.reply.messageId);
       messageOptions['quotedMessageId'] = message.id.id;
       return message.reply(
         messageMedia || body.content,
@@ -79,22 +82,31 @@ export class MessageService {
     // return whatsappChat.sendMessage(body.content);
   }
 
-  async reactMessage(body: { messageId: string; reaction: string }) {
-    const message = await this.gateway.client.getMessageById(body.messageId);
+  async reactMessage(
+    body: { messageId: string; reaction: string },
+    sessionId: string,
+  ) {
+    const message = await this.gateway.clients
+      .get(sessionId)
+      .getMessageById(body.messageId);
     return await message.react(body.reaction);
   }
 
-  async deleteMessage(body: { messageId: string }) {
-    const message = await this.gateway.client.getMessageById(body.messageId);
+  async deleteMessage(body: { messageId: string }, sessionId: string) {
+    const message = await this.gateway.clients
+      .get(sessionId)
+      .getMessageById(body.messageId);
     return await message.delete(true);
   }
 
-  async fetchMessages(body: Chat): Promise<MessageEntity[]> {
+  async fetchMessages(body: Chat, sessionId: string): Promise<MessageEntity[]> {
     let messageEntities: Promise<MessageEntity>[] = [];
     let messageEntity: MessageEntity;
     let quotedMessage: QuotedMessageEntity = null;
 
-    const chat = await this.gateway.client.getChatById(body.id._serialized);
+    const chat = await this.gateway.clients
+      .get(sessionId)
+      .getChatById(body.id._serialized);
     await chat.sendSeen();
     // this.gateway.setupMessageEventListeners();
 
@@ -197,11 +209,11 @@ export class MessageService {
     return Promise.all(messageEntities);
   }
 
-  async fetchMessageMedia(message: Message): Promise<MessageMedia> {
-    const newMessage = await this.gateway.client.getMessageById(
-      message.id._serialized,
-    );
-    if (newMessage.hasMedia) return await newMessage.downloadMedia();
-    return null;
-  }
+  // async fetchMessageMedia(message: Message): Promise<MessageMedia> {
+  //   const newMessage = await this.gateway.client.getMessageById(
+  //     message.id._serialized,
+  //   );
+  //   if (newMessage.hasMedia) return await newMessage.downloadMedia();
+  //   return null;
+  // }
 }

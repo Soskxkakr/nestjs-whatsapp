@@ -11,9 +11,9 @@ export class ChatService {
     private readonly databaseService: DatabaseService,
   ) {}
 
-  async findAll(): Promise<ChatEntity[]> {
+  async findAll(sessionId: string): Promise<ChatEntity[]> {
     let chatEntities: Promise<ChatEntity>[] = [];
-    const chats = await this.gateway.client.getChats();
+    const chats = await this.gateway.clients.get(sessionId).getChats();
 
     chatEntities = chats.map(async (chat) => {
       const contact = await chat.getContact();
@@ -40,9 +40,9 @@ export class ChatService {
                 isMyContact,
                 isMe,
               }))(
-                await this.gateway.client.getContactById(
-                  chat?.lastMessage?.author,
-                ),
+                await this.gateway.clients
+                  .get(sessionId)
+                  .getContactById(chat?.lastMessage?.author),
               )
             : null,
         participants: chat.isGroup
@@ -62,9 +62,9 @@ export class ChatService {
                   isMyContact,
                   isMe,
                 }))(
-                  await this.gateway.client.getContactById(
-                    participant.id._serialized,
-                  ),
+                  await this.gateway.clients
+                    .get(sessionId)
+                    .getContactById(participant.id._serialized),
                 ),
               })),
             )
@@ -79,43 +79,43 @@ export class ChatService {
     return Promise.all(chatEntities);
   }
 
-  async findById(id: string): Promise<Chat> {
-    return this.gateway.client.getChatById(id);
+  async findById(id: string, sessionId: string): Promise<Chat> {
+    return this.gateway.clients.get(sessionId).getChatById(id);
   }
 
-  async syncAllChats() {
-    const chats = await this.gateway.client.getChats();
-    const chatEntities = chats.map(async (chat) => {
-      const contact = await chat.getContact();
-      return {
-        id: chat.id,
-        phoneNumber: contact.number,
-        name: chat.name,
-        profilePicUrl: await contact.getProfilePicUrl(),
-        unreadCount: chat.unreadCount,
-        lastMessage: chat.lastMessage?.body || '',
-        timestamp: chat.timestamp,
-        isMe: contact.isMe,
-        isMyContact: contact.isMyContact,
-        isUser: contact.isUser,
-        isGroup: contact.isGroup,
-      } as ChatEntity;
-    });
+  // async syncAllChats() {
+  //   const chats = await this.gateway.client.getChats();
+  //   const chatEntities = chats.map(async (chat) => {
+  //     const contact = await chat.getContact();
+  //     return {
+  //       id: chat.id,
+  //       phoneNumber: contact.number,
+  //       name: chat.name,
+  //       profilePicUrl: await contact.getProfilePicUrl(),
+  //       unreadCount: chat.unreadCount,
+  //       lastMessage: chat.lastMessage?.body || '',
+  //       timestamp: chat.timestamp,
+  //       isMe: contact.isMe,
+  //       isMyContact: contact.isMyContact,
+  //       isUser: contact.isUser,
+  //       isGroup: contact.isGroup,
+  //     } as ChatEntity;
+  //   });
 
-    const realChats = await Promise.all(chatEntities);
-    const values = realChats.map((realChat) => {
-      // return `('${realChat.id._serialized}', '${realChat.name}', '${realChat.phoneNumber}', '${realChat.profilePicUrl}', ${realChat.unreadCount}, '${realChat.lastMessage}', '${new Date(realChat.timestamp).toISOString()}', ${realChat.isMe ? 1 : 0}, ${realChat.isMyContact ? 1 : 0}, ${realChat.isUser ? 1 : 0}, ${realChat.isGroup ? 1 : 0})`;
-      return `('${realChat.id._serialized}', '${realChat.name}', '${realChat.phoneNumber}', 'https:\/\/pps.whatsapp.net/v/t61.24694-24/342235661_695917945669158_5932808463367197920_n.jpg?ccb=11-4&oh=01_ASDiKOvwOu2CBf-eKNqKVUSU9nqDSe_x_ekSOcAXPwlTPA&oe=6620ABEF&_nc_sid=e6ed6c&_nc_cat=107', ${realChat.unreadCount}, '${realChat.lastMessage}', '${new Date(realChat.timestamp).toISOString()}', ${realChat.isMe ? 1 : 0}, ${realChat.isMyContact ? 1 : 0}, ${realChat.isUser ? 1 : 0}, ${realChat.isGroup ? 1 : 0})`;
-    });
-    // console.log(`INSERT INTO em255.WhatsAppChats
-    // (ChatID, Name, PhoneNumber, ProfilePictureUrl, UnreadCount, LastMessage, Timestamp, IsMe, IsMyContact, IsUser, IsGroup) VALUES
-    // ${values.join(', ')}`);
+  //   const realChats = await Promise.all(chatEntities);
+  //   const values = realChats.map((realChat) => {
+  //     // return `('${realChat.id._serialized}', '${realChat.name}', '${realChat.phoneNumber}', '${realChat.profilePicUrl}', ${realChat.unreadCount}, '${realChat.lastMessage}', '${new Date(realChat.timestamp).toISOString()}', ${realChat.isMe ? 1 : 0}, ${realChat.isMyContact ? 1 : 0}, ${realChat.isUser ? 1 : 0}, ${realChat.isGroup ? 1 : 0})`;
+  //     return `('${realChat.id._serialized}', '${realChat.name}', '${realChat.phoneNumber}', 'https:\/\/pps.whatsapp.net/v/t61.24694-24/342235661_695917945669158_5932808463367197920_n.jpg?ccb=11-4&oh=01_ASDiKOvwOu2CBf-eKNqKVUSU9nqDSe_x_ekSOcAXPwlTPA&oe=6620ABEF&_nc_sid=e6ed6c&_nc_cat=107', ${realChat.unreadCount}, '${realChat.lastMessage}', '${new Date(realChat.timestamp).toISOString()}', ${realChat.isMe ? 1 : 0}, ${realChat.isMyContact ? 1 : 0}, ${realChat.isUser ? 1 : 0}, ${realChat.isGroup ? 1 : 0})`;
+  //   });
+  //   // console.log(`INSERT INTO em255.WhatsAppChats
+  //   // (ChatID, Name, PhoneNumber, ProfilePictureUrl, UnreadCount, LastMessage, Timestamp, IsMe, IsMyContact, IsUser, IsGroup) VALUES
+  //   // ${values.join(', ')}`);
 
-    const result = await this.databaseService.executeQuery(
-      `INSERT INTO em255.WhatsAppChats
-      (ChatID, [Name], PhoneNumber, ProfilePictureUrl, UnreadCount, LastMessage, [Timestamp], IsMe, IsMyContact, IsUser, IsGroup) VALUES
-      ${values.join(', ')}`,
-    );
-    console.log('hihi', result);
-  }
+  //   const result = await this.databaseService.executeQuery(
+  //     `INSERT INTO em255.WhatsAppChats
+  //     (ChatID, [Name], PhoneNumber, ProfilePictureUrl, UnreadCount, LastMessage, [Timestamp], IsMe, IsMyContact, IsUser, IsGroup) VALUES
+  //     ${values.join(', ')}`,
+  //   );
+  //   console.log('hihi', result);
+  // }
 }

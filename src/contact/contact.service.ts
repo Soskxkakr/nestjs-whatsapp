@@ -6,7 +6,7 @@ import { Contact } from 'whatsapp-web.js';
 export class ContactService {
   constructor(private readonly gateway: Gateway) {}
 
-  async findAll(): Promise<Contact[]> {
-    return this.gateway.client.getContacts();
+  async findAll(sessionId: string): Promise<Contact[]> {
+    return this.gateway.clients.get(sessionId).getContacts();
   }
 }

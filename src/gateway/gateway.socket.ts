@@ -6,7 +6,7 @@ import {
   Client,
   LocalAuth,
   Message,
-  MessageMedia,
+  // MessageMedia,
   MessageTypes,
 } from 'whatsapp-web.js';
 
@@ -14,15 +14,26 @@ import {
 export class Gateway implements OnModuleInit {
   @WebSocketServer()
   server: Server;
-  client: Client;
+  clients: Map<string, Client> = new Map();
 
   onModuleInit() {
     this.server.on('connection', async (socket) => {
-      if (!!this.client) await this.client.destroy();
-
       const { sessionId } = socket.handshake.query;
+      console.log(`[${new Date().toUTCString()}] ${sessionId} is connected.`);
 
-      this.client = new Client({
+      socket.on('disconnect', async () => {
+        console.log(`${sessionId} has disconnected.`);
+        this.server.emit('onDisconnect', {
+          msg: 'You have been disconnected.',
+        });
+      });
+
+      if (this.clients.has(sessionId as string)) {
+        await this.clients.get(sessionId as string).destroy();
+        this.clients.delete(sessionId as string);
+      }
+
+      const client = new Client({
         authStrategy: new LocalAuth({
           dataPath: `Session-${sessionId}`,
         }),
@@ -30,59 +41,88 @@ export class Gateway implements OnModuleInit {
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
         puppeteer: {
           headless: true,
-          args: ['--no-sandbox'],
+          args: [
+            '--no-sandbox',
+            '--no-experiments',
+            '--hide-scrollbars',
+            '--disable-plugins',
+            '--disable-infobars',
+            '--disable-translate',
+            '--disable-pepper-3d',
+            '--disable-extensions',
+            '--disable-dev-shm-usage',
+            '--disable-notifications',
+            '--disable-setuid-sandbox',
+            '--disable-crash-reporter',
+            '--disable-smooth-scrolling',
+            '--disable-login-animations',
+            '--disable-dinosaur-easter-egg',
+            '--disable-accelerated-2d-canvas',
+            '--disable-rtc-smoothness-algorithm',
+          ],
         },
       });
-      this.setupEventListeners();
-      this.client.initialize();
-    });
-    this.server.on('disconnect', (reason) => {
-      console.log(`socket disconnected due to ${reason}`);
+
+      this.clients.set(sessionId as string, client);
+      this.setupEventListeners(sessionId as string);
+      client.initialize();
+      console.log('clients', this.clients.keys());
     });
   }
 
-  setupEventListeners() {
-    this.client.on('qr', (qr) => {
+  setupEventListeners(sessionId: string) {
+    this.clients.get(sessionId).on('qr', (qr) => {
+      console.log(
+        `[${new Date().toUTCString()}]  ${sessionId} Generating QR Code...`,
+      );
       this.server.emit('onClientQr', {
         qrCode: qr,
       });
     });
-    this.client.once('ready', async () => {
-      console.log('Client is ready');
+    this.clients.get(sessionId).once('ready', async () => {
+      console.log(`[${new Date().toUTCString()}] ${sessionId} Client is ready`);
       this.server.emit('onClientConnected', {
         msg: 'Client connected!',
       });
     });
-    this.client.on('loading_screen', (percent, message) => {
+    this.clients.get(sessionId).on('loading_screen', (percent, message) => {
+      console.log(
+        `[${new Date().toUTCString()}] ${sessionId} Loading ${percent}...`,
+      );
       this.server.emit('onLoading', {
         percentage: percent,
         msg: message,
       });
     });
-    this.client.on('remote_session_saved', () => {
+    this.clients.get(sessionId).on('remote_session_saved', () => {
       this.server.emit('onRemoteSessionSaved', {
         msg: 'Remote session saved successfully.',
       });
     });
-    this.client.on('disconnected', (data) => {
-      console.log('disconnected', data);
+    this.clients.get(sessionId).on('disconnected', () => {
+      console.log(
+        `[${new Date().toUTCString()}]  ${sessionId} Deleted WhatsApp and disconnect`,
+      );
+      this.clients.delete(sessionId as string);
       this.server.emit('onClientDisconnected', {
         msg: 'Client has disconnected',
       });
     });
-    this.client.on('auth_failure', (message) => {
+    this.clients.get(sessionId).on('auth_failure', (message) => {
       this.server.emit('onAuthFailure', {
         msg: message,
       });
     });
-    this.client.on('message_create', async (message) => {
+    this.clients.get(sessionId).on('message_create', async (message) => {
       if (message.body === '!resendmedia' && message.hasQuotedMsg) {
         const quotedMsg = await message.getQuotedMessage();
         if (quotedMsg.hasMedia) {
           const attachmentData = await quotedMsg.downloadMedia();
-          this.client.sendMessage(message.from, attachmentData, {
-            caption: "Here's your requested media.",
-          });
+          this.clients
+            .get(sessionId)
+            .sendMessage(message.from, attachmentData, {
+              caption: "Here's your requested media.",
+            });
         }
       } else if (message.body === '!mediainfo' && message.hasMedia) {
         const attachmentData = await message.downloadMedia();
@@ -184,23 +224,25 @@ export class Gateway implements OnModuleInit {
         });
       }
     });
-    this.client.on('message_revoke_everyone', (_, revoked_msg) => {
-      this.server.emit('onMessageRevoked', {
-        id: revoked_msg.id,
-        from: revoked_msg.from,
-        to: revoked_msg.to,
-        timestamp: revoked_msg.timestamp,
-        type: MessageTypes.REVOKED,
-        body: revoked_msg.body,
+    this.clients
+      .get(sessionId)
+      .on('message_revoke_everyone', (_, revoked_msg) => {
+        this.server.emit('onMessageRevoked', {
+          id: revoked_msg.id,
+          from: revoked_msg.from,
+          to: revoked_msg.to,
+          timestamp: revoked_msg.timestamp,
+          type: MessageTypes.REVOKED,
+          body: revoked_msg.body,
+        });
       });
-    });
-    this.client.on('message_ack', (message, ack) => {
+    this.clients.get(sessionId).on('message_ack', (message, ack) => {
       this.server.emit('onMessageAck', {
         message,
         ack,
       });
     });
-    this.client.on('message_reaction', (reaction) => {
+    this.clients.get(sessionId).on('message_reaction', (reaction) => {
       this.server.emit('onMessageReaction', reaction);
     });
   }
@@ -281,9 +323,9 @@ export class Gateway implements OnModuleInit {
   //   });
   // }
 
-  async fetchMessageMedia(message: Message): Promise<MessageMedia> {
-    const newMessage = await this.client.getMessageById(message.id._serialized);
-    if (newMessage.hasMedia) return await newMessage.downloadMedia();
-    return null;
-  }
+  // async fetchMessageMedia(message: Message): Promise<MessageMedia> {
+  //   const newMessage = await this.client.getMessageById(message.id._serialized);
+  //   if (newMessage.hasMedia) return await newMessage.downloadMedia();
+  //   return null;
+  // }
 }
