@@ -199,9 +199,9 @@ export class MessageService {
           status: message.ack,
         };
 
-        if (message.type === 'video') {
-          console.log(await message.downloadMedia());
-        }
+        // if (message.type === 'video') {
+        //   console.log(await message.downloadMedia());
+        // }
 
         return messageEntity;
       }

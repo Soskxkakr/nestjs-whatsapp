@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Gateway } from 'src/gateway/gateway.socket';
 import { Chat, GroupChat, MessageTypes } from 'whatsapp-web.js';
 import { ChatEntity } from './chat.entity';
@@ -6,6 +6,7 @@ import { DatabaseService } from 'src/common/databse.service';
 
 @Injectable()
 export class ChatService {
+  private logger = new Logger('Chat');
   constructor(
     private readonly gateway: Gateway,
     private readonly databaseService: DatabaseService,
@@ -13,16 +14,34 @@ export class ChatService {
 
   async findAll(sessionId: string): Promise<ChatEntity[]> {
     let chatEntities: Promise<ChatEntity>[] = [];
-    const chats = await this.gateway.clients.get(sessionId).getChats();
+    this.logger.verbose(`${sessionId} fetching all chats...`);
+    const chats = await this.gateway.clients
+      .get(sessionId)
+      .getChats()
+      .then((chats: Chat[]) => {
+        this.logger.debug(`${sessionId} got all ${chats.length} chats`);
+        return chats.sort((a, b) => b.timestamp - a.timestamp);
+      })
+      .catch((err) => {
+        this.logger.error(`ERROR in fetching all chats: ${err}`);
+        return [];
+      });
 
-    chatEntities = chats.map(async (chat) => {
+    chatEntities = chats.slice(0, 15).map(async (chat: Chat) => {
       const contact = await chat.getContact();
+      const profilePicUrl = await this.gateway.clients
+        .get(sessionId)
+        .getProfilePicUrl(contact.id._serialized)
+        .catch((err) => {
+          this.logger.error(`ERROR in fetching profile picture: ${err}`);
+          return '';
+        });
 
       return {
         id: chat.id,
         phoneNumber: contact.number,
         name: chat.name,
-        profilePicUrl: await contact.getProfilePicUrl(),
+        profilePicUrl,
         unreadCount: chat.unreadCount,
         lastMessage:
           chat.lastMessage?.type === MessageTypes.CIPHERTEXT
@@ -32,7 +51,9 @@ export class ChatService {
         status: chat.lastMessage?.ack,
         timestamp: chat.timestamp,
         author:
-          contact.isGroup && !chat.lastMessage?.fromMe
+          contact.isGroup &&
+          !chat.lastMessage?.fromMe &&
+          chat?.lastMessage?.author
             ? (({ name, pushname, shortName, isMyContact, isMe }) => ({
                 name,
                 pushname,

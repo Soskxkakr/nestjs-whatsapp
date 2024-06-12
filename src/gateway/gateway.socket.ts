@@ -1,6 +1,6 @@
-import { OnModuleInit } from '@nestjs/common';
+import { Logger, OnModuleInit } from '@nestjs/common';
 import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
-import { Server } from 'socket.io';
+import { Server, Socket } from 'socket.io';
 import { QuotedMessageEntity } from 'src/message/message.entity';
 import {
   Client,
@@ -15,105 +15,165 @@ export class Gateway implements OnModuleInit {
   @WebSocketServer()
   server: Server;
   clients: Map<string, Client> = new Map();
+  sockets: Map<string, Socket> = new Map();
+  private logger = new Logger('Gateway');
 
   onModuleInit() {
     this.server.on('connection', async (socket) => {
-      const { sessionId } = socket.handshake.query;
-      console.log(`[${new Date().toUTCString()}] ${sessionId} is connected.`);
+      try {
+        const { sessionId } = socket.handshake.query;
+        this.logger.verbose(`${sessionId} is connected.`);
 
-      socket.on('disconnect', async () => {
-        console.log(`${sessionId} has disconnected.`);
-        this.server.emit('onDisconnect', {
-          msg: 'You have been disconnected.',
+        socket.on('disconnect', async () => {
+          this.logger.verbose(`${sessionId} has disconnected.`);
+          if (this.clients.has(sessionId as string)) {
+            await this.onDisconnect(sessionId as string);
+          }
         });
-      });
 
-      if (this.clients.has(sessionId as string)) {
-        await this.clients.get(sessionId as string).destroy();
-        this.clients.delete(sessionId as string);
+        if (this.clients.has(sessionId as string)) {
+          await this.onDisconnect(sessionId as string);
+        }
+
+        const client = new Client({
+          authStrategy: new LocalAuth({
+            clientId: sessionId as string,
+            dataPath: `Session-${sessionId}`,
+          }),
+          webVersion: '2.2412.54',
+          webVersionCache: {
+            type: 'remote',
+            remotePath:
+              'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
+          },
+          userAgent:
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+          puppeteer: {
+            headless: true,
+            args: [
+              '--no-sandbox',
+              '--disable-setuid-sandbox',
+              '--disable-dev-shm-usage',
+              '--single-process',
+              '--no-zygote',
+              '--no-first-run',
+              '--no-default-browser-check',
+              '--disable-extensions',
+              '--disable-default-apps',
+              '--disable-sync',
+              '--disable-translate',
+              '--disable-web-security',
+              '--disable-features=site-per-process',
+              '--disable-infobars',
+              '--window-position=0,0',
+              '--ignore-certificate-errors',
+              '--ignore-certificate-errors-spki-list',
+              '--disable-gpu',
+              '--disable-webgl',
+              '--disable-threaded-animation',
+              '--disable-threaded-scrolling',
+              '--disable-in-process-stack-traces',
+              '--disable-histogram-customizer',
+              '--disable-gl-extensions',
+              '--disable-composited-antialiasing',
+              '--disable-canvas-aa',
+              '--disable-3d-apis',
+              '--disable-accelerated-2d-canvas',
+              '--disable-accelerated-jpeg-decoding',
+              '--disable-accelerated-mjpeg-decode',
+              '--disable-app-list-dismiss-on-blur',
+              '--disable-accelerated-video-decode',
+            ],
+          },
+        });
+        this.clients.set(sessionId as string, client);
+        this.sockets.set(sessionId as string, socket);
+        this.logger.verbose(
+          `Connected Clients: ${Array.from(this.clients.keys()).join(', ')}`,
+        );
+        this.logger.verbose(`initializing ${sessionId}`);
+        client.initialize();
+        // await client
+        //   .initialize()
+        //   .then(() => {
+        //     this.logger.verbose(
+        //       `${sessionId} initialized. Setting up listeners...`,
+        //     );
+        //     this.setupEventListeners(sessionId as string);
+        //   })
+        //   .catch((err) => {
+        //     this.logger.error(`${sessionId} Failed to initialize: ${err}`);
+        //   });
+      } catch (e) {
+        this.logger.error(`ERROR in initializing: ${e}`);
       }
-
-      const client = new Client({
-        authStrategy: new LocalAuth({
-          dataPath: `Session-${sessionId}`,
-        }),
-        userAgent:
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-        puppeteer: {
-          headless: true,
-          args: [
-            '--no-sandbox',
-            '--no-experiments',
-            '--hide-scrollbars',
-            '--disable-plugins',
-            '--disable-infobars',
-            '--disable-translate',
-            '--disable-pepper-3d',
-            '--disable-extensions',
-            '--disable-dev-shm-usage',
-            '--disable-notifications',
-            '--disable-setuid-sandbox',
-            '--disable-crash-reporter',
-            '--disable-smooth-scrolling',
-            '--disable-login-animations',
-            '--disable-dinosaur-easter-egg',
-            '--disable-accelerated-2d-canvas',
-            '--disable-rtc-smoothness-algorithm',
-          ],
-        },
-      });
-
-      this.clients.set(sessionId as string, client);
-      this.setupEventListeners(sessionId as string);
-      client.initialize();
-      console.log('clients', this.clients.keys());
     });
   }
 
-  setupEventListeners(sessionId: string) {
-    this.clients.get(sessionId).on('qr', (qr) => {
-      console.log(
-        `[${new Date().toUTCString()}]  ${sessionId} Generating QR Code...`,
-      );
-      this.server.emit('onClientQr', {
+  private async initializeClient(sessionId: string) {
+    await this.clients
+      .get(sessionId)
+      .initialize()
+      .then(() => {
+        this.logger.verbose(
+          `${sessionId} initialized. Setting up listeners...`,
+        );
+        this.setupEventListeners(sessionId as string);
+      })
+      .catch(async (err) => {
+        this.logger.error(`${sessionId} Failed to initialize: ${err}`);
+        await this.onDisconnect(sessionId).then(async () => {
+          this.logger.error(`${sessionId} re-initializing the client.`);
+          await this.initializeClient(sessionId);
+        });
+      });
+  }
+
+  private setupEventListeners(sessionId: string) {
+    const client = this.clients.get(sessionId);
+    const socket = this.sockets.get(sessionId);
+
+    client.on('qr', (qr) => {
+      this.logger.verbose(`${sessionId} QR generated.`);
+      socket.emit('onClientQr', {
         qrCode: qr,
       });
     });
-    this.clients.get(sessionId).once('ready', async () => {
-      console.log(`[${new Date().toUTCString()}] ${sessionId} Client is ready`);
-      this.server.emit('onClientConnected', {
+    client.once('ready', async () => {
+      this.logger.verbose(`${sessionId} is ready.`);
+      socket.emit('onClientConnected', {
         msg: 'Client connected!',
       });
     });
-    this.clients.get(sessionId).on('loading_screen', (percent, message) => {
-      console.log(
-        `[${new Date().toUTCString()}] ${sessionId} Loading ${percent}...`,
-      );
-      this.server.emit('onLoading', {
+    client.on('loading_screen', (percent, message) => {
+      this.logger.verbose(`${sessionId} loading ${percent} percent.`);
+      socket.emit('onLoading', {
         percentage: percent,
         msg: message,
       });
     });
-    this.clients.get(sessionId).on('remote_session_saved', () => {
-      this.server.emit('onRemoteSessionSaved', {
+    client.on('change_state', (state) => {
+      this.logger.verbose(`${sessionId} state changed to -> ${state}`);
+    });
+    client.on('remote_session_saved', () => {
+      socket.emit('onRemoteSessionSaved', {
         msg: 'Remote session saved successfully.',
       });
     });
-    this.clients.get(sessionId).on('disconnected', () => {
-      console.log(
-        `[${new Date().toUTCString()}]  ${sessionId} Deleted WhatsApp and disconnect`,
-      );
-      this.clients.delete(sessionId as string);
-      this.server.emit('onClientDisconnected', {
+    client.on('disconnected', async () => {
+      this.logger.verbose(`${sessionId} has removed from the linked devices.`);
+      await this.onDisconnect(sessionId);
+      socket.emit('onClientDisconnected', {
         msg: 'Client has disconnected',
       });
     });
-    this.clients.get(sessionId).on('auth_failure', (message) => {
-      this.server.emit('onAuthFailure', {
+    client.on('auth_failure', (message) => {
+      this.logger.log(`${sessionId} auth failed: ${message}}`);
+      socket.emit('onAuthFailure', {
         msg: message,
       });
     });
-    this.clients.get(sessionId).on('message_create', async (message) => {
+    client.on('message_create', async (message) => {
       if (message.body === '!resendmedia' && message.hasQuotedMsg) {
         const quotedMsg = await message.getQuotedMessage();
         if (quotedMsg.hasMedia) {
@@ -146,38 +206,26 @@ export class Gateway implements OnModuleInit {
       ) {
         const contact = await message.getContact();
         const chat = await message.getChat();
-
-        // Fixing cache issue only for message attachment media
-        // if (
-        //   [
-        //     MessageTypes.VIDEO,
-        //     MessageTypes.IMAGE,
-        //     MessageTypes.STICKER,
-        //   ].includes(message.type)
-        // ) {
-        //   rawData = message.rawData as Message;
-        //   attachment = await this.fetchMessageMedia(message);
-        // }
+        const messageMedia = message.hasMedia
+          ? await message.downloadMedia().catch((err) => {
+              this.logger.error(`ERROR in downloading media ${err}`);
+              return null;
+            })
+          : null;
 
         if (message.hasQuotedMsg) {
           const quote = await message.getQuotedMessage();
-
-          // Fixing cache issue for quoted message attachment media
-          // if (
-          //   [
-          //     MessageTypes.VIDEO,
-          //     MessageTypes.IMAGE,
-          //     MessageTypes.STICKER,
-          //   ].includes(quote.type)
-          // ) {
-          //   quotedRawData = quote.rawData as Message;
-          //   quotedAttachment = await this.fetchMessageMedia(quote);
-          // }
+          const quotedMessageMedia = quote.hasMedia
+            ? await quote.downloadMedia().catch((err) => {
+                this.logger.error(`ERROR in downloading quoted media: ${err}`);
+                return null;
+              })
+            : null;
 
           quotedMessage = {
             id: quote.id,
             hasMedia: quote.hasMedia,
-            attachment: quote.hasMedia ? await quote.downloadMedia() : null,
+            attachment: quotedMessageMedia,
             thumbnail: quote.hasMedia
               ? (quote.rawData as Message).body || ''
               : '',
@@ -190,12 +238,12 @@ export class Gateway implements OnModuleInit {
           };
         }
 
-        this.server.emit('onMessageCreated', {
+        socket.emit('onMessageCreated', {
           id: message.id,
           hasMedia: message.hasMedia,
           hasQuotedMessage: message.hasQuotedMsg,
           quotedMessage: quotedMessage,
-          attachment: message.hasMedia ? await message.downloadMedia() : null,
+          attachment: messageMedia,
           thumbnail: message.hasMedia
             ? (message.rawData as Message).body || ''
             : '',
@@ -224,27 +272,50 @@ export class Gateway implements OnModuleInit {
         });
       }
     });
-    this.clients
-      .get(sessionId)
-      .on('message_revoke_everyone', (_, revoked_msg) => {
-        this.server.emit('onMessageRevoked', {
-          id: revoked_msg.id,
-          from: revoked_msg.from,
-          to: revoked_msg.to,
-          timestamp: revoked_msg.timestamp,
-          type: MessageTypes.REVOKED,
-          body: revoked_msg.body,
-        });
+    client.on('message_revoke_everyone', (_, revoked_msg) => {
+      socket.emit('onMessageRevoked', {
+        id: revoked_msg.id,
+        from: revoked_msg.from,
+        to: revoked_msg.to,
+        timestamp: revoked_msg.timestamp,
+        type: MessageTypes.REVOKED,
+        body: revoked_msg.body,
       });
-    this.clients.get(sessionId).on('message_ack', (message, ack) => {
-      this.server.emit('onMessageAck', {
+    });
+    client.on('message_ack', (message, ack) => {
+      socket.emit('onMessageAck', {
         message,
         ack,
       });
     });
-    this.clients.get(sessionId).on('message_reaction', (reaction) => {
-      this.server.emit('onMessageReaction', reaction);
+    client.on('message_reaction', (reaction) => {
+      socket.emit('onMessageReaction', reaction);
     });
+  }
+
+  private async onDisconnect(sessionId: string) {
+    try {
+      await this.clients
+        .get(sessionId)
+        .destroy()
+        .then(() => {
+          this.logger.verbose(`${sessionId} has been resetted.`);
+          this.clients.delete(sessionId);
+          this.sockets.delete(sessionId);
+          this.logger.verbose(
+            `Connected Clients: ${Array.from(this.clients.keys()).join(', ')}`,
+          );
+        })
+        .catch((err) => {
+          this.logger.error(`ERROR in resetting the state: ${err}`);
+        });
+    } catch (e) {
+      this.logger.error(`ERROR in disconnecting the client: ${e}`);
+      setTimeout(async () => {
+        this.logger.log(`Retrying in 3 seconds...`);
+        await this.onDisconnect(sessionId);
+      }, 3000);
+    }
   }
 
   // setupMessageEventListeners() {
@@ -299,7 +370,7 @@ export class Gateway implements OnModuleInit {
 
   //       console.log('emitting message!');
 
-  //       this.server.emit('onMessageReceived', {
+  //       socket.emit('onMessageReceived', {
   //         id: message.id,
   //         hasMedia: message.hasMedia,
   //         hasQuotedMessage: message.hasQuotedMsg,
