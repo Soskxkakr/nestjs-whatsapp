@@ -9,6 +9,8 @@ import {
   // MessageMedia,
   MessageTypes,
 } from 'whatsapp-web.js';
+import * as fs from 'fs';
+import * as path from 'path';
 
 @WebSocketGateway({ cors: true })
 export class Gateway implements OnModuleInit {
@@ -26,9 +28,9 @@ export class Gateway implements OnModuleInit {
 
         socket.on('disconnect', async () => {
           this.logger.verbose(`${sessionId} has disconnected.`);
-          if (this.clients.has(sessionId as string)) {
-            await this.onDisconnect(sessionId as string);
-          }
+          // if (this.clients.has(sessionId as string)) {
+          //   await this.onDisconnect(sessionId as string);
+          // }
         });
 
         if (this.clients.has(sessionId as string)) {
@@ -40,12 +42,6 @@ export class Gateway implements OnModuleInit {
             clientId: sessionId as string,
             dataPath: `Session-${sessionId}`,
           }),
-          webVersion: '2.2412.54',
-          webVersionCache: {
-            type: 'remote',
-            remotePath:
-              'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
-          },
           userAgent:
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
           puppeteer: {
@@ -86,24 +82,14 @@ export class Gateway implements OnModuleInit {
             ],
           },
         });
+
         this.clients.set(sessionId as string, client);
+        this.initializeClient(sessionId as string);
         this.sockets.set(sessionId as string, socket);
         this.logger.verbose(
           `Connected Clients: ${Array.from(this.clients.keys()).join(', ')}`,
         );
-        this.logger.verbose(`initializing ${sessionId}`);
-        // client.initialize();
-        await client
-          .initialize()
-          .then(() => {
-            this.logger.verbose(
-              `${sessionId} initialized. Setting up listeners...`,
-            );
-            this.setupEventListeners(sessionId as string);
-          })
-          .catch((err) => {
-            this.logger.error(`${sessionId} Failed to initialize: ${err}`);
-          });
+        this.logger.verbose(`Initializing ${sessionId}`);
       } catch (e) {
         this.logger.error(`ERROR in initializing: ${e}`);
       }
@@ -139,7 +125,13 @@ export class Gateway implements OnModuleInit {
         qrCode: qr,
       });
     });
-    client.once('ready', async () => {
+    client.on('authenticated', () => {
+      this.logger.verbose(`${sessionId} is authenticated.`);
+      socket.emit('onAuthenticated', {
+        msg: 'Client authenticated!',
+      });
+    });
+    client.on('ready', () => {
       this.logger.verbose(`${sessionId} is ready.`);
       socket.emit('onClientConnected', {
         msg: 'Client connected!',
@@ -161,10 +153,14 @@ export class Gateway implements OnModuleInit {
       });
     });
     client.on('disconnected', async () => {
-      this.logger.verbose(`${sessionId} has removed from the linked devices.`);
-      await this.onDisconnect(sessionId);
       socket.emit('onClientDisconnected', {
         msg: 'Client has disconnected',
+      });
+      this.logger.verbose(`${sessionId} has removed from the linked devices.`);
+      await this.onDisconnect(sessionId).then(() => {
+        fs.rmdir(path.join(__dirname, `Session-${sessionId}`), () => {
+          this.logger.verbose(`Session-${sessionId} folder has been deleted.`);
+        });
       });
     });
     client.on('auth_failure', (message) => {
@@ -204,8 +200,19 @@ export class Gateway implements OnModuleInit {
           MessageTypes.DOCUMENT,
         ].includes(message.type)
       ) {
-        const contact = await message.getContact();
-        const chat = await message.getChat();
+        const contact = await message.getContact().catch((err) => {
+          this.logger.error(
+            `${sessionId} failed in getting the contact information: ${err}`,
+          );
+          return null;
+        });
+        const chat = await message.getChat().catch((err) => {
+          this.logger.error(`${sessionId} failed in getting the chat: ${err}`);
+          return null;
+        });
+
+        if (!contact || !chat) return;
+
         const messageMedia = message.hasMedia
           ? await message.downloadMedia().catch((err) => {
               this.logger.error(`ERROR in downloading media ${err}`);
@@ -315,6 +322,39 @@ export class Gateway implements OnModuleInit {
         this.logger.log(`Retrying in 3 seconds...`);
         await this.onDisconnect(sessionId);
       }, 3000);
+    }
+  }
+
+  async getClientState(
+    sessionId: string,
+    retries: number,
+  ): Promise<Client | null> {
+    try {
+      const state = await this.clients.get(sessionId).getState();
+      this.logger.debug(`${sessionId} state: ${state}`);
+
+      if (state === 'CONNECTED') {
+        return this.clients.get(sessionId);
+      }
+
+      this.logger.debug(
+        `${sessionId} retrying to get client's connection in 2 seconds...`,
+      );
+
+      if (retries > 1) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        return this.getClientState(sessionId, retries - 1);
+      } else {
+        this.logger.warn(
+          `${sessionId} has reached the maximum number of retries. Please restart your client.`,
+        );
+        return null;
+      }
+    } catch (err) {
+      this.logger.error(
+        `${sessionId} ERROR in getting connected client: ${err}`,
+      );
+      return null;
     }
   }
 }

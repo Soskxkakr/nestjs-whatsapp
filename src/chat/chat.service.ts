@@ -14,7 +14,11 @@ export class ChatService {
 
   async findAll(sessionId: string): Promise<ChatEntity[]> {
     let chatEntities: Promise<ChatEntity>[] = [];
+    const client = await this.gateway.getClientState(sessionId, 3);
     this.logger.verbose(`${sessionId} fetching all chats...`);
+
+    if (!client) return [];
+
     const chats = await this.gateway.clients
       .get(sessionId)
       .getChats()
@@ -29,7 +33,7 @@ export class ChatService {
 
     chatEntities = chats.slice(0, 15).map(async (chat: Chat) => {
       const contact = await chat.getContact().catch((err) => {
-        this.logger.error(`ERROR in fetcing contact information: ${err}`);
+        this.logger.error(`ERROR in fetching contact information: ${err}`);
         return null;
       });
 
@@ -109,40 +113,4 @@ export class ChatService {
   async findById(id: string, sessionId: string): Promise<Chat> {
     return this.gateway.clients.get(sessionId).getChatById(id);
   }
-
-  // async syncAllChats() {
-  //   const chats = await this.gateway.client.getChats();
-  //   const chatEntities = chats.map(async (chat) => {
-  //     const contact = await chat.getContact();
-  //     return {
-  //       id: chat.id,
-  //       phoneNumber: contact.number,
-  //       name: chat.name,
-  //       profilePicUrl: await contact.getProfilePicUrl(),
-  //       unreadCount: chat.unreadCount,
-  //       lastMessage: chat.lastMessage?.body || '',
-  //       timestamp: chat.timestamp,
-  //       isMe: contact.isMe,
-  //       isMyContact: contact.isMyContact,
-  //       isUser: contact.isUser,
-  //       isGroup: contact.isGroup,
-  //     } as ChatEntity;
-  //   });
-
-  //   const realChats = await Promise.all(chatEntities);
-  //   const values = realChats.map((realChat) => {
-  //     // return `('${realChat.id._serialized}', '${realChat.name}', '${realChat.phoneNumber}', '${realChat.profilePicUrl}', ${realChat.unreadCount}, '${realChat.lastMessage}', '${new Date(realChat.timestamp).toISOString()}', ${realChat.isMe ? 1 : 0}, ${realChat.isMyContact ? 1 : 0}, ${realChat.isUser ? 1 : 0}, ${realChat.isGroup ? 1 : 0})`;
-  //     return `('${realChat.id._serialized}', '${realChat.name}', '${realChat.phoneNumber}', 'https:\/\/pps.whatsapp.net/v/t61.24694-24/342235661_695917945669158_5932808463367197920_n.jpg?ccb=11-4&oh=01_ASDiKOvwOu2CBf-eKNqKVUSU9nqDSe_x_ekSOcAXPwlTPA&oe=6620ABEF&_nc_sid=e6ed6c&_nc_cat=107', ${realChat.unreadCount}, '${realChat.lastMessage}', '${new Date(realChat.timestamp).toISOString()}', ${realChat.isMe ? 1 : 0}, ${realChat.isMyContact ? 1 : 0}, ${realChat.isUser ? 1 : 0}, ${realChat.isGroup ? 1 : 0})`;
-  //   });
-  //   // console.log(`INSERT INTO em255.WhatsAppChats
-  //   // (ChatID, Name, PhoneNumber, ProfilePictureUrl, UnreadCount, LastMessage, Timestamp, IsMe, IsMyContact, IsUser, IsGroup) VALUES
-  //   // ${values.join(', ')}`);
-
-  //   const result = await this.databaseService.executeQuery(
-  //     `INSERT INTO em255.WhatsAppChats
-  //     (ChatID, [Name], PhoneNumber, ProfilePictureUrl, UnreadCount, LastMessage, [Timestamp], IsMe, IsMyContact, IsUser, IsGroup) VALUES
-  //     ${values.join(', ')}`,
-  //   );
-  //   console.log('hihi', result);
-  // }
 }
