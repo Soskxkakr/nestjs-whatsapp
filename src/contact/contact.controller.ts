@@ -1,4 +1,4 @@
-import { Controller, Get, Param } from '@nestjs/common';
+import { Controller, Get, Param, Post } from '@nestjs/common';
 import { Contact } from 'whatsapp-web.js';
 import { ContactService } from './contact.service';
 
@@ -9,5 +9,12 @@ export class ContactController {
   @Get(':sessionId')
   findAll(@Param('sessionId') sessionId: string): Promise<Contact[]> {
     return this.contactService.findAll(sessionId);
+  }
+
+  @Post('/syncContacts/:sessionId')
+  syncContacts(
+    @Param('sessionId') sessionId: string,
+  ): Promise<{ success: boolean; rowsAffected?: number; error?: string }> {
+    return this.contactService.syncContacts(sessionId);
   }
 }

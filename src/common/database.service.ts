@@ -19,11 +19,6 @@ export class DatabaseService {
         },
       }).connect();
 
-      // const request = pool.request();
-      // parameters.forEach((param: any, index: number) => {
-      //   request.input((index + 1).toString(), param);
-      // });
-      // console.log(query);
       const result = await pool.request().query(query);
       // const result = await request.query(query);
       await pool.close();

@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Gateway } from 'src/gateway/gateway.socket';
 import { Chat, GroupChat, MessageTypes } from 'whatsapp-web.js';
 import { ChatEntity } from './chat.entity';
-import { DatabaseService } from 'src/common/databse.service';
+import { DatabaseService } from 'src/common/database.service';
 
 @Injectable()
 export class ChatService {
@@ -19,7 +19,7 @@ export class ChatService {
       .get(sessionId)
       .getChats()
       .then((chats: Chat[]) => {
-        this.logger.debug(`${sessionId} got all ${chats.length} chats`);
+        this.logger.verbose(`${sessionId} got all ${chats.length} chats`);
         return chats.sort((a, b) => b.timestamp - a.timestamp);
       })
       .catch((err) => {
@@ -28,7 +28,13 @@ export class ChatService {
       });
 
     chatEntities = chats.slice(0, 15).map(async (chat: Chat) => {
-      const contact = await chat.getContact();
+      const contact = await chat.getContact().catch((err) => {
+        this.logger.error(`ERROR in fetcing contact information: ${err}`);
+        return null;
+      });
+
+      if (!contact) return;
+
       const profilePicUrl = await this.gateway.clients
         .get(sessionId)
         .getProfilePicUrl(contact.id._serialized)

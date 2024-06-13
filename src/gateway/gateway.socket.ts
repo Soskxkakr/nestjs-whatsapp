@@ -92,18 +92,18 @@ export class Gateway implements OnModuleInit {
           `Connected Clients: ${Array.from(this.clients.keys()).join(', ')}`,
         );
         this.logger.verbose(`initializing ${sessionId}`);
-        client.initialize();
-        // await client
-        //   .initialize()
-        //   .then(() => {
-        //     this.logger.verbose(
-        //       `${sessionId} initialized. Setting up listeners...`,
-        //     );
-        //     this.setupEventListeners(sessionId as string);
-        //   })
-        //   .catch((err) => {
-        //     this.logger.error(`${sessionId} Failed to initialize: ${err}`);
-        //   });
+        // client.initialize();
+        await client
+          .initialize()
+          .then(() => {
+            this.logger.verbose(
+              `${sessionId} initialized. Setting up listeners...`,
+            );
+            this.setupEventListeners(sessionId as string);
+          })
+          .catch((err) => {
+            this.logger.error(`${sessionId} Failed to initialize: ${err}`);
+          });
       } catch (e) {
         this.logger.error(`ERROR in initializing: ${e}`);
       }
@@ -317,86 +317,4 @@ export class Gateway implements OnModuleInit {
       }, 3000);
     }
   }
-
-  // setupMessageEventListeners() {
-  //   let attachment: MessageMedia = null;
-  //   let profilePicUrl: string = '';
-  //   let quotedMessage: QuotedMessageEntity = null;
-  //   let rawData: Message;
-
-  //   this.client.on('message', async (message) => {
-  //     console.log('listening to messages now...');
-  //     if (
-  //       [MessageTypes.IMAGE, MessageTypes.VIDEO, MessageTypes.TEXT].includes(
-  //         message.type,
-  //       )
-  //     ) {
-  //       const contact = await message.getContact();
-
-  //       // Fixing cache issue only for Video type of message
-  //       if ([MessageTypes.VIDEO, MessageTypes.IMAGE].includes(message.type)) {
-  //         rawData = message.rawData as Message;
-  //         attachment = await this.fetchMessageMedia(message);
-  //       }
-
-  //       if (!contact.isMe) {
-  //         profilePicUrl = await contact.getProfilePicUrl();
-  //       }
-
-  //       if (message.hasQuotedMsg) {
-  //         const quote = await message.getQuotedMessage();
-  //         let quotedRawData: Message;
-  //         let quotedAttachment: MessageMedia = null;
-
-  //         // Fixing cache issue for quoted message attachment media
-  //         if ([MessageTypes.VIDEO, MessageTypes.IMAGE].includes(quote.type)) {
-  //           quotedRawData = quote.rawData as Message;
-  //           quotedAttachment = await this.fetchMessageMedia(quote);
-  //         }
-
-  //         quotedMessage = {
-  //           id: quote.id,
-  //           hasMedia: quote.hasMedia,
-  //           attachment: quotedAttachment,
-  //           thumbnail: quotedRawData.body,
-  //           body: quote.body,
-  //           type: quote.type,
-  //           to: quote.to,
-  //           fromMe: quote.fromMe,
-  //           timestamp: quote.timestamp,
-  //           status: quote.ack,
-  //         };
-  //       }
-
-  //       console.log('emitting message!');
-
-  //       socket.emit('onMessageReceived', {
-  //         id: message.id,
-  //         hasMedia: message.hasMedia,
-  //         hasQuotedMessage: message.hasQuotedMsg,
-  //         quotedMessage: quotedMessage,
-  //         attachment,
-  //         thumbnail: message.hasMedia ? rawData?.body || '' : '',
-  //         body: message.body,
-  //         type: message.type,
-  //         from: {
-  //           name: message.author || '',
-  //           profilePicUrl: profilePicUrl,
-  //           phoneNumber: contact.number,
-  //           isMyContact: contact.isMyContact,
-  //         },
-  //         to: message.to,
-  //         fromMe: message.fromMe,
-  //         timestamp: message.timestamp,
-  //         status: message.ack,
-  //       });
-  //     }
-  //   });
-  // }
-
-  // async fetchMessageMedia(message: Message): Promise<MessageMedia> {
-  //   const newMessage = await this.client.getMessageById(message.id._serialized);
-  //   if (newMessage.hasMedia) return await newMessage.downloadMedia();
-  //   return null;
-  // }
 }
