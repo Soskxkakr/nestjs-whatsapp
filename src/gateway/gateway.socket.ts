@@ -245,40 +245,6 @@ export class Gateway implements OnModuleInit {
           };
         }
 
-        console.log({
-          id: message.id,
-          hasMedia: message.hasMedia,
-          hasQuotedMessage: message.hasQuotedMsg,
-          quotedMessage: quotedMessage,
-          attachment: messageMedia,
-          thumbnail: message.hasMedia
-            ? (message.rawData as Message).body || ''
-            : '',
-          body: message.body,
-          type: message.type,
-          author: (({ name, pushname, shortName, isMyContact, isMe }) => ({
-            name,
-            pushname,
-            shortName,
-            isMyContact,
-            isMe,
-          }))(contact),
-          from: {
-            name: message.author || '',
-            profilePicUrl: !message.fromMe
-              ? await contact.getProfilePicUrl()
-              : null,
-            phoneNumber: contact.number,
-            isMyContact: contact.isMyContact,
-          },
-          to: message.to,
-          chat: chat,
-          isGroup: chat.isGroup,
-          fromMe: message.fromMe,
-          timestamp: message.timestamp,
-          status: message.ack,
-        });
-
         socket.emit('onMessageCreated', {
           id: message.id,
           hasMedia: message.hasMedia,

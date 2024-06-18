@@ -33,18 +33,23 @@ export class ContactService {
       .filter(
         (contact: Contact) => contact.id.server !== 'lid' && !contact.isGroup,
       )
-      .map(async (contact: Contact, idx: number) => {
-        const profilePic = await contact.getProfilePicUrl().catch((err) => {
+      .map(async (contact: Contact) => {
+        const profilePic = await this.fetchWithTimeout(
+          this.gateway.clients
+            .get(sessionId)
+            .getProfilePicUrl(contact.id._serialized),
+          3000,
+          '',
+        ).catch((err) => {
           this.logger.error(
             `${sessionId} ERROR in fetching profile picture: ${err}`,
           );
-          return '-';
+          return '';
         });
         return {
-          // ContactID: contact.id._serialized,
-          Mobile: contact.number || '-',
-          SubscriberID: idx,
-          ThumbnailImagePath: profilePic || '-',
+          Mobile: contact.number || '',
+          SubscriberID: '',
+          ThumbnailImagePath: profilePic || '',
           ContactName:
             contact.name ||
             contact.pushname ||
@@ -57,27 +62,143 @@ export class ContactService {
         };
       });
 
-    const values = (await Promise.all(filteredContacts))
-      .map((value) => {
-        return `('${value.Mobile.replace(/'/g, "''")}', ${value.SubscriberID}, '${value.ThumbnailImagePath.replace(/'/g, "''")}', '${value.ContactName.replace(/'/g, "''")}', ${value.isActive}, '${value.CreatedDate}', '${value.ModifiedDate}')`;
-      })
-      .join(', ');
+    const contactsData = await Promise.all(filteredContacts);
+    const chunkSize = 800;
+    let totalRowsAffected = 0;
 
-    const response = await this.databaseService
-      .executeQuery(
-        `INSERT INTO ${'em255'}.WhatsappContacts (Mobile, SubscriberID, ThumbnailImagePath, ContactName, isActive, CreatedDate, ModifiedDate) VALUES ${values}`,
-      )
-      .then((res) => {
-        this.logger.log(
-          `${sessionId} syncing successfull. Rows affected: ${res.rowsAffected[0]}.`,
-        );
-        return { success: true, rowsAffected: res.rowsAffected[0] };
-      })
-      .catch((err) => {
-        this.logger.error(`${sessionId} failed to sync contacts: ${err}`);
-        return { success: false, error: err };
-      });
+    for (let i = 0; i < contactsData.length; i += chunkSize) {
+      const chunk = contactsData.slice(i, i + chunkSize);
+      const values = chunk
+        .map((value) => {
+          return `('+${value.Mobile.replace(/'/g, "''")}', '${value.SubscriberID}', '${value.ThumbnailImagePath.replace(/'/g, "''")}', N'${value.ContactName.replace(/'/g, "''")}', ${value.isActive}, '${value.CreatedDate}', '${value.ModifiedDate}')`;
+        })
+        .join(', ');
 
-    return response;
+      await this.databaseService
+        .executeQuery(`DROP TABLE IF EXISTS ${sessionId}.TempWhatsAppContacts`)
+        .then(() => {
+          this.logger.verbose(
+            `TABLE ${sessionId}.TempWhatsAppContacts DROPPED.`,
+          );
+        })
+        .catch((err) => {
+          this.logger.error(
+            `ERROR in dropping TABLE ${sessionId}.TempWhatsAppContacts: ${err}`,
+          );
+        });
+
+      await this.databaseService
+        .executeQuery(
+          `SELECT * INTO ${sessionId}.TempWhatsAppContacts FROM ${sessionId}.WhatsAppContacts; TRUNCATE TABLE ${sessionId}.TempWhatsAppContacts`,
+        )
+        .then(() => {
+          this.logger.verbose(
+            `TABLE ${sessionId}.TempWhatsAppContacts CREATED`,
+          );
+        })
+        .catch((err) => {
+          this.logger.error(
+            `ERROR in copying TABLE to ${sessionId}.TempWhatsAppContacts: ${err}`,
+          );
+        });
+
+      await this.databaseService
+        .executeQuery(
+          `INSERT INTO ${sessionId}.TempWhatsAppContacts (Mobile, SubscriberID, ThumbnailImagePath, ContactName, isActive, CreatedDate, ModifiedDate) VALUES ${values}`,
+        )
+        .then((res) => {
+          this.logger.verbose(
+            `Contacts inserted into ${sessionId}.TempWhatsAppContacts. Rows affected: ${res.rowsAffected[0]}`,
+          );
+        })
+        .catch((err) => {
+          this.logger.error(
+            `ERROR in inserting contacts into TABLE ${sessionId}.TempWhatsAppContacts: ${err}`,
+          );
+        });
+
+      await this.databaseService
+        .executeQuery(
+          `UPDATE ${sessionId}.WhatsAppContacts 
+          SET 
+            ThumbnailImagePath = t.ThumbnailImagePath,
+            ContactName = t.ContactName,
+            isActive = t.isActive,
+            ModifiedDate = t.ModifiedDate
+          FROM ${sessionId}.TempWhatsAppContacts t
+          WHERE ${sessionId}.WhatsAppContacts.Mobile = t.Mobile`,
+        )
+        .then((res) => {
+          this.logger.verbose(
+            `TABLE ${sessionId}.WhatsAppContacts updated with the latest data. Rows affected: ${res.rowsAffected[0]}`,
+          );
+        })
+        .catch((err) => {
+          this.logger.error(
+            `ERROR in updating the ${sessionId}.WhatsAppContacts: ${err}`,
+          );
+        });
+
+      const response = await this.databaseService
+        .executeQuery(
+          `INSERT INTO ${sessionId}.WhatsappContacts (Mobile, SubscriberID, ThumbnailImagePath, ContactName, isActive, CreatedDate, ModifiedDate) 
+          SELECT Mobile, SubscriberID, ThumbnailImagePath, ContactName, isActive, CreatedDate, ModifiedDate
+          FROM ${sessionId}.TempWhatsAppContacts t
+          WHERE NOT EXISTS (
+            SELECT 1 FROM ${sessionId}.WhatsAppContacts w WHERE w.mobile = t.mobile
+          )`,
+        )
+        .then((res) => {
+          this.logger.log(
+            `New data inserted to ${sessionId}.WhatsAppContacts. Rows affected: ${res.rowsAffected[0]}.`,
+          );
+          totalRowsAffected += res.rowsAffected[0];
+          return { success: true, rowsAffected: res.rowsAffected[0] };
+        })
+        .catch((err) => {
+          this.logger.error(
+            `${sessionId} failed to insert data to ${sessionId}.WhatsAppContacts: ${err}`,
+          );
+          return { success: false, error: err };
+        });
+
+      await this.databaseService
+        .executeQuery(`DROP TABLE IF EXISTS ${sessionId}.TempWhatsAppContacts`)
+        .then(() => {
+          this.logger.verbose(
+            `DROPPED TABLE ${sessionId}.TempWhatsAppContacts`,
+          );
+        })
+        .catch((err) => {
+          this.logger.error(
+            `ERROR in dropping TABLE ${sessionId}.TempWhatsAppContacts: ${err}`,
+          );
+        });
+
+      if (!response.success) {
+        return response;
+      }
+    }
+
+    return { success: true, rowsAffected: totalRowsAffected };
+  }
+
+  async fetchWithTimeout(
+    promise: Promise<any>,
+    timeout: number,
+    defaultValue: any,
+  ) {
+    let timeoutHandle: NodeJS.Timeout;
+
+    const timeoutPromise = new Promise((resolve) => {
+      timeoutHandle = setTimeout(() => resolve(defaultValue), timeout);
+    });
+
+    try {
+      const result = await Promise.race([promise, timeoutPromise]);
+      return result;
+    } finally {
+      clearTimeout(timeoutHandle);
+    }
   }
 }
