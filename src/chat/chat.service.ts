@@ -39,19 +39,24 @@ export class ChatService {
 
       if (!contact) return;
 
-      const profilePicUrl = await this.gateway.clients
-        .get(sessionId)
-        .getProfilePicUrl(contact.id._serialized)
-        .catch((err) => {
-          this.logger.error(`ERROR in fetching profile picture: ${err}`);
-          return '';
-        });
+      const profilePicUrl = await this.fetchWithTimeout(
+        this.gateway.clients
+          .get(sessionId)
+          .getProfilePicUrl(contact.id._serialized),
+        3000,
+        '-',
+      ).catch((err) => {
+        this.logger.error(
+          `${sessionId} ERROR in fetching profile picture: ${err}`,
+        );
+        return '-';
+      });
 
       return {
         id: chat.id,
         phoneNumber: contact.number,
         name: chat.name,
-        profilePicUrl,
+        profilePicUrl: profilePicUrl !== '-' ? profilePicUrl : null,
         unreadCount: chat.unreadCount,
         lastMessage:
           chat.lastMessage?.type === MessageTypes.CIPHERTEXT
@@ -112,5 +117,24 @@ export class ChatService {
 
   async findById(id: string, sessionId: string): Promise<Chat> {
     return this.gateway.clients.get(sessionId).getChatById(id);
+  }
+
+  async fetchWithTimeout(
+    promise: Promise<any>,
+    timeout: number,
+    defaultValue: any,
+  ) {
+    let timeoutHandle;
+
+    const timeoutPromise = new Promise((resolve) => {
+      timeoutHandle = setTimeout(() => resolve(defaultValue), timeout);
+    });
+
+    try {
+      const result = await Promise.race([promise, timeoutPromise]);
+      return result;
+    } finally {
+      clearTimeout(timeoutHandle);
+    }
   }
 }
