@@ -26,12 +26,20 @@ jobs:
           npm install
           npm run build --if-present
           npm run test --if-present
-      
+
+      - name: Archive production-ready files
+        run: |
+          mkdir -p build
+          cp -r * build
+          cd build
+          zip -r ../node-app.zip .
+        shell: bash
+
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v3
         with:
           name: node-app
-          path: .
+          path: node-app.zip
 
   deploy:
     runs-on: ubuntu-latest
@@ -39,13 +47,17 @@ jobs:
     environment:
       name: 'Production'
       url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
-    
+
     steps:
       - name: Download artifact from build job
         uses: actions/download-artifact@v3
         with:
           name: node-app
-      
+          path: .
+
+      - name: Unzip artifact
+        run: unzip node-app.zip
+
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v2
         id: deploy-to-webapp
@@ -54,3 +66,6 @@ jobs:
           slot-name: 'Production'
           package: .
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_4E9355B6BC2244FEA81A6A46E2D54664 }}
+
+      - name: Clean up
+        run: rm -f node-app.zip
