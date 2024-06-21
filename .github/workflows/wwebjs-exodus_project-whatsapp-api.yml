@@ -29,7 +29,8 @@ jobs:
 
       - name: Archive production-ready files
         run: |
-          zip -r node-app.zip dist
+          npm install -g bestzip
+          bestzip node-app.zip dist/*
         shell: bash
 
       - name: Upload artifact for deployment job
