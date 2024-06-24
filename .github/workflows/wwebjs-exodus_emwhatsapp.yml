@@ -16,6 +16,12 @@ env:
 jobs:
   build:
     runs-on: windows-latest
+    needs: build
+    environment:
+      name: 'Production'
+      url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
+    permissions:
+      id-token: write #This is required for requesting the JWT
     steps:
       - name: 'Checkout GitHub Action'
         uses: actions/checkout@v4
