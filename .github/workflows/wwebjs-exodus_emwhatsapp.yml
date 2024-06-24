@@ -34,27 +34,6 @@ jobs:
           npm run test --if-present
           popd
 
-      - name: Upload artifact for deployment job
-        uses: actions/upload-artifact@v3
-        with:
-          name: node-app
-          path: .
-
-  deploy:
-    runs-on: windows-latest
-    needs: build
-    environment:
-      name: 'Production'
-      url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
-    permissions:
-      id-token: write #This is required for requesting the JWT
-
-    steps:
-      - name: Download artifact from build job
-        uses: actions/download-artifact@v3
-        with:
-          name: node-app
-      
       - name: Login to Azure
         uses: azure/login@v1
         with:
@@ -69,4 +48,39 @@ jobs:
           app-name: 'EMWhatsApp'
           slot-name: 'Production'
           package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-          
+
+      # - name: Upload artifact for deployment job
+      #   uses: actions/upload-artifact@v3
+      #   with:
+      #     name: node-app
+      #     path: .
+
+  # deploy:
+  #   runs-on: windows-latest
+  #   needs: build
+  #   environment:
+  #     name: 'Production'
+  #     url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
+  #   permissions:
+  #     id-token: write #This is required for requesting the JWT
+
+  #   steps:
+  #     - name: Download artifact from build job
+  #       uses: actions/download-artifact@v3
+  #       with:
+  #         name: node-app
+
+  #     - name: Login to Azure
+  #       uses: azure/login@v1
+  #       with:
+  #         client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_0B74639793024306A05A6F742D2AC824 }}
+  #         tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_10A7AA171FEE4A0E9328E219A420940C }}
+  #         subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_3983750A86E9444ABAFC4EE4EE3F5F32 }}
+
+  #     - name: 'Run Azure Functions Action'
+  #       uses: Azure/functions-action@v1
+  #       id: fa
+  #       with:
+  #         app-name: 'EMWhatsApp'
+  #         slot-name: 'Production'
+  #         package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
