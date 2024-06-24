@@ -157,11 +157,35 @@ export class Gateway implements OnModuleInit {
         msg: 'Client has disconnected',
       });
       this.logger.verbose(`${sessionId} has removed from the linked devices.`);
-      await this.onDisconnect(sessionId).then(() => {
-        fs.rmdir(path.join(__dirname, `Session-${sessionId}`), () => {
-          this.logger.verbose(`Session-${sessionId} folder has been deleted.`);
+      // await this.onDisconnect(sessionId).then(() => {
+      //   fs.rmdir(path.join(__dirname, `Session-${sessionId}`), () => {
+      //     this.logger.verbose(`Session-${sessionId} folder has been deleted.`);
+      //   });
+      // });
+      await this.clients
+        .get(sessionId)
+        .logout()
+        .then(() => {
+          this.logger.verbose(`Session-${sessionId} has logged out.`);
+        })
+        .catch((err) => {
+          this.logger.error(`Session-${sessionId} failed to logout: ${err}`);
         });
-      });
+      fs.rm(
+        path.join(path.join(__dirname, `Session-${sessionId}}`)),
+        { recursive: true, force: true },
+        (err) => {
+          if (err) {
+            this.logger.error(
+              `Error deleting Session-${sessionId} folder: ${err}`,
+            );
+          } else {
+            this.logger.verbose(
+              `Session-${sessionId} folder has been deleted.`,
+            );
+          }
+        },
+      );
     });
     client.on('auth_failure', (message) => {
       this.logger.log(`${sessionId} auth failed: ${message}}`);
