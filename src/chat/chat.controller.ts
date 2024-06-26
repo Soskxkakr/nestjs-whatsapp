@@ -1,14 +1,13 @@
 import { Controller, Get, Param } from '@nestjs/common';
-import { Chat } from 'whatsapp-web.js';
 import { ChatService } from './chat.service';
-import { ChatEntity } from './chat.entity';
+// import { ChatEntity } from './chat.entity';
 
 @Controller('chat')
 export class ChatController {
   constructor(private readonly chatService: ChatService) {}
 
   @Get(':sessionId')
-  findAll(@Param('sessionId') sessionId: string): Promise<ChatEntity[]> {
+  findAll(@Param('sessionId') sessionId: string): Promise<any> {
     return this.chatService.findAll(sessionId);
   }
 
@@ -16,7 +15,7 @@ export class ChatController {
   findById(
     @Param('id') id: string,
     @Param('sessionId') sessionId: string,
-  ): Promise<Chat> {
+  ): Promise<any> {
     return this.chatService.findById(id, sessionId);
   }
 }
