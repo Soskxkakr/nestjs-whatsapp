@@ -1,25 +1,32 @@
-import { OnModuleInit } from '@nestjs/common';
+import { Logger, OnModuleInit } from '@nestjs/common';
 import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import {
   useMultiFileAuthState,
   makeWASocket,
   makeInMemoryStore,
+  makeCacheableSignalKeyStore,
+  fetchLatestBaileysVersion,
+  WAMessageContent,
+  WAMessageKey,
+  proto,
+  DisconnectReason,
 } from '@whiskeysockets/baileys';
-import { Logger, PinoLogger } from 'nestjs-pino';
+import P from 'pino';
+import { Boom } from '@hapi/boom';
+// import NodeCache from 'node-cache';
 
 @WebSocketGateway({ cors: true })
 export class Gateway implements OnModuleInit {
-  constructor(
-    private readonly logger: Logger,
-    private readonly pinoLogger: PinoLogger,
-  ) {}
-
   @WebSocketServer()
   server: Server;
-  clients: Map<string, any> = new Map();
+  clients: Map<string, ReturnType<typeof makeWASocket>> = new Map();
   sockets: Map<string, Socket> = new Map();
-  stores: Map<string, any> = new Map();
+  stores: Map<string, ReturnType<typeof makeInMemoryStore>> = new Map();
+  private logger = new Logger('Gateway');
+  private pl = P({ timestamp: () => `,"time":"${new Date().toJSON()}"` }).child(
+    {},
+  );
 
   onModuleInit() {
     this.server.on('connection', async (socket) => {
@@ -34,6 +41,7 @@ export class Gateway implements OnModuleInit {
           .get(sessionId as string)
           ?.readFromFile(`./store/session-${sessionId}.json`);
         setInterval(() => {
+          this.logger.log('writing to store');
           this.stores
             .get(sessionId as string)
             ?.writeToFile(`./store/session-${sessionId}.json`);
@@ -44,7 +52,7 @@ export class Gateway implements OnModuleInit {
 
         socket.on('disconnect', () => {
           this.logger.log(`Ending session for ${sessionId}`);
-          this.clients.get(sessionId as string).end();
+          this.clients.get(sessionId as string).end(undefined);
         });
 
         this.logger.verbose(
@@ -59,24 +67,59 @@ export class Gateway implements OnModuleInit {
 
   private async initializeClient(sessionId: string) {
     const socket = this.sockets.get(sessionId);
-    const { state: auth, saveCreds } = await useMultiFileAuthState(
+    this.pl.level = 'trace';
+
+    const { state, saveCreds } = await useMultiFileAuthState(
       `keys/session-${sessionId}`,
     );
-    const waSocket = makeWASocket({ auth });
+    const { version, isLatest } = await fetchLatestBaileysVersion();
+    // const msgRetryCounterCache = new NodeCache();
+    this.logger.log(`using WA v${version.join('.')}, isLatest: ${isLatest}`);
+    const waSocket = makeWASocket({
+      version,
+      logger: this.pl,
+      printQRInTerminal: true,
+      auth: {
+        creds: state.creds,
+        keys: makeCacheableSignalKeyStore(state.keys, this.pl),
+      },
+      // msgRetryCounterCache,
+      generateHighQualityLinkPreview: true,
+      getMessage: async (key) => {
+        if (this.stores.get(sessionId)) {
+          const msg = await this.stores
+            .get(sessionId)
+            .loadMessage(key.remoteJid!, key.id!);
+          return msg?.message || undefined;
+        }
+
+        // only if store is present
+        return proto.Message.fromObject({});
+      },
+    });
     this.stores.get(sessionId).bind(waSocket.ev);
 
     waSocket.ev.process(async (events) => {
       if (events['connection.update']) {
-        const { connection, qr } = events['connection.update'];
+        const { connection, qr, lastDisconnect } = events['connection.update'];
         if (qr) {
           socket.emit('onClientQr', {
             qrCode: qr,
           });
         }
         if (connection === 'close') {
-          this.initializeClient(sessionId);
+          if (
+            (lastDisconnect?.error as Boom)?.output?.statusCode !==
+            DisconnectReason.loggedOut
+          ) {
+            this.initializeClient(sessionId);
+          } else {
+            this.logger.log('Connection closed. You are logged out.');
+          }
+          this.logger.log('Connection closed ');
         }
         if (connection === 'open') {
+          // this.clients.get(sessionId).process();
           socket.emit('onClientConnected', {
             msg: 'Client connected!',
           });
@@ -102,5 +145,18 @@ export class Gateway implements OnModuleInit {
     return waSocket;
   }
 
-  private setupEventListeners() {}
+  private async getMessage(
+    key: WAMessageKey,
+    sessionId: string,
+  ): Promise<WAMessageContent | undefined> {
+    if (this.stores.get(sessionId)) {
+      const msg = await this.stores
+        .get(sessionId)
+        .loadMessage(key.remoteJid!, key.id!);
+      return msg?.message || undefined;
+    }
+
+    // only if store is present
+    return proto.Message.fromObject({});
+  }
 }

@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { LoggerModule, PinoLogger } from 'nestjs-pino';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { GateWayModule } from './gateway/gateway.module';
@@ -10,9 +9,8 @@ import { MessageModule } from './message/message.module';
 import { DatabaseModule } from './common/database.module';
 import { FileModule } from './file/file.module';
 import { UtilityModule } from './utils/utility.module';
+import { TransformerModule } from './transformer/transformer.module';
 import config from './config';
-import { pinoConfig } from './utils/logger.config';
-import { APP_INTERCEPTOR } from '@nestjs/core';
 
 @Module({
   imports: [
@@ -23,9 +21,6 @@ import { APP_INTERCEPTOR } from '@nestjs/core';
       load: [config],
       isGlobal: true,
     }),
-    LoggerModule.forRoot({
-      pinoHttp: pinoConfig,
-    }),
     ChatModule,
     ContactModule,
     FileModule,
@@ -33,14 +28,9 @@ import { APP_INTERCEPTOR } from '@nestjs/core';
     GateWayModule,
     MessageModule,
     UtilityModule,
+    TransformerModule,
   ],
   controllers: [AppController],
-  providers: [
-    AppService,
-    {
-      provide: APP_INTERCEPTOR,
-      useClass: PinoLogger,
-    },
-  ],
+  providers: [AppService],
 })
 export class AppModule {}
