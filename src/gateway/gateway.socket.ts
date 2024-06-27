@@ -7,13 +7,14 @@ import {
   makeInMemoryStore,
   makeCacheableSignalKeyStore,
   fetchLatestBaileysVersion,
-  WAMessageContent,
-  WAMessageKey,
   proto,
   DisconnectReason,
 } from '@whiskeysockets/baileys';
 import P from 'pino';
 import { Boom } from '@hapi/boom';
+import * as path from 'path';
+import * as fs from 'fs';
+import * as NodeCache from 'node-cache';
 // import NodeCache from 'node-cache';
 
 @WebSocketGateway({ cors: true })
@@ -35,24 +36,36 @@ export class Gateway implements OnModuleInit {
         this.logger.log(`${sessionId} is connected.`);
         this.sockets.set(sessionId as string, socket);
 
-        // Setting up store
-        this.stores.set(sessionId as string, makeInMemoryStore({}));
-        this.stores
-          .get(sessionId as string)
-          ?.readFromFile(`./store/session-${sessionId}.json`);
-        setInterval(() => {
-          this.logger.log('writing to store');
-          this.stores
-            .get(sessionId as string)
-            ?.writeToFile(`./store/session-${sessionId}.json`);
-        }, 10_000);
-
-        const waClient = await this.initializeClient(sessionId as string);
-        this.clients.set(sessionId as string, waClient);
+        const { memoryStore, waSocket } = await this.initializeClient(
+          sessionId as string,
+        );
+        this.clients.set(sessionId as string, waSocket);
+        this.stores.set(sessionId as string, memoryStore);
 
         socket.on('disconnect', () => {
           this.logger.log(`Ending session for ${sessionId}`);
-          this.clients.get(sessionId as string).end(undefined);
+          // this.clients.get(sessionId as string).end(undefined);
+          this.stores.delete(sessionId as string);
+          this.clients.delete(sessionId as string);
+          this.sockets.delete(sessionId as string);
+
+          const sessionFilePath = path.join(
+            process.cwd(),
+            'store',
+            `session-${sessionId}.json`,
+          );
+          fs.unlink(sessionFilePath, (err) => {
+            if (err) {
+              this.logger.error(
+                `Error deleting session file for ${sessionId}:`,
+                err,
+              );
+            } else {
+              this.logger.log(
+                `Session file for ${sessionId} deleted successfully.`,
+              );
+            }
+          });
         });
 
         this.logger.verbose(
@@ -66,6 +79,16 @@ export class Gateway implements OnModuleInit {
   }
 
   private async initializeClient(sessionId: string) {
+    // Setting up store
+    const memoryStore = makeInMemoryStore({});
+    this.stores.set(sessionId, memoryStore);
+
+    memoryStore?.readFromFile(`./store/session-${sessionId}.json`);
+    setInterval(() => {
+      this.logger.log('writing to store...');
+      memoryStore?.writeToFile(`./store/session-${sessionId}.json`);
+    }, 10_000);
+
     const socket = this.sockets.get(sessionId);
     this.pl.level = 'trace';
 
@@ -73,31 +96,32 @@ export class Gateway implements OnModuleInit {
       `keys/session-${sessionId}`,
     );
     const { version, isLatest } = await fetchLatestBaileysVersion();
-    // const msgRetryCounterCache = new NodeCache();
+    const msgRetryCounterCache = new NodeCache();
     this.logger.log(`using WA v${version.join('.')}, isLatest: ${isLatest}`);
     const waSocket = makeWASocket({
       version,
       logger: this.pl,
       printQRInTerminal: true,
+      // auth: state,
       auth: {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, this.pl),
       },
-      // msgRetryCounterCache,
+      msgRetryCounterCache,
       generateHighQualityLinkPreview: true,
       getMessage: async (key) => {
+        let msg: proto.IWebMessageInfo;
         if (this.stores.get(sessionId)) {
-          const msg = await this.stores
+          msg = await this.stores
             .get(sessionId)
             .loadMessage(key.remoteJid!, key.id!);
           return msg?.message || undefined;
         }
 
-        // only if store is present
-        return proto.Message.fromObject({});
+        return (msg?.message || undefined) as proto.IMessage | undefined;
       },
     });
-    this.stores.get(sessionId).bind(waSocket.ev);
+    memoryStore.bind(waSocket.ev);
 
     waSocket.ev.process(async (events) => {
       if (events['connection.update']) {
@@ -126,7 +150,15 @@ export class Gateway implements OnModuleInit {
         }
       }
 
-      if (events['creds.update']) await saveCreds();
+      if (events['creds.update']) {
+        await saveCreds()
+          .then(() => {
+            this.logger.verbose('saving creds...');
+          })
+          .catch((err) => {
+            this.logger.error(`error in saving creds: ${err}`);
+          });
+      }
 
       if (events['messages.upsert']) {
         const upsert = events['messages.upsert'];
@@ -140,23 +172,12 @@ export class Gateway implements OnModuleInit {
         const { isLatest } = events['messaging-history.set'];
         this.logger.log(`history set isLatest: ${isLatest}`);
       }
+
+      if (events['chats.update']) {
+        this.logger.verbose(events['chats.update']);
+      }
     });
 
-    return waSocket;
-  }
-
-  private async getMessage(
-    key: WAMessageKey,
-    sessionId: string,
-  ): Promise<WAMessageContent | undefined> {
-    if (this.stores.get(sessionId)) {
-      const msg = await this.stores
-        .get(sessionId)
-        .loadMessage(key.remoteJid!, key.id!);
-      return msg?.message || undefined;
-    }
-
-    // only if store is present
-    return proto.Message.fromObject({});
+    return { memoryStore, waSocket };
   }
 }
